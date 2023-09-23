@@ -1,55 +1,58 @@
-#include "common.h"
+#include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
+#include "common.h"
 
-uint8_t *packets[5];
-int packet_sizes[5];
-int set_packets = 0;
+#define MAX_PACKETS 1000 
+#define MAX_PACKET_SIZE 100000 
 
-int compare(const void *a, const void *b) {
-    uint8_t *packet_a = *(uint8_t **)a;
-    uint8_t *packet_b = *(uint8_t **)b;
-    int sequence_a = get_bits(packet_a, 14, 18);
-    int sequence_b = get_bits(packet_b, 14, 18);
-    return sequence_a - sequence_b;
+typedef struct {
+    uint8_t data[MAX_PACKET_SIZE];
+    int size;
+    unsigned int sequence;
+} Packet;
+
+void sort_packets(Packet packets[], int n) {
+    int i, j;
+    for(i = 0; i < n-1; i++) {
+        for(j = 0; j < n-i-1; j++) {
+            if(packets[j].sequence > packets[j+1].sequence) {
+                Packet temp = packets[j];
+                packets[j] = packets[j+1];
+                packets[j+1] = temp;
+            }
+        }
+    }
 }
 
 int main() {
-    while(!feof(stdin)) {
-        for (set_packets = 0; set_packets < 5; ++set_packets) {
-            uint8_t header[6];
-            int header_read = fread(header, 1, 6, stdin);
-            if (header_read == 0) {
-                fprintf(stderr, "Incomplete header read.\n");
-                return 1;
-            }
-            
-            int data_length = get_bits(header, 16, 32) + 1;
-            packets[set_packets] = malloc(6 + data_length);
-            memcpy(packets[set_packets], header, 6);
-            
-            int data_read = fread(packets[set_packets] + 6, 1, data_length, stdin);
-            if(data_read != data_length) {
-                fprintf(stderr, "Incomplete data read.\n");
-                return 1;
-            }
-            
-            packet_sizes[set_packets] = 6 + data_length;
-        }
+    Packet packets[MAX_PACKETS];
+    int packet_count = 0;
 
-        // Sort the packets based on their sequence number
-        qsort(packets, 5, sizeof(uint8_t *), compare);
+    while(!feof(stdin) && packet_count < MAX_PACKETS) {
+        int data_read = fread(packets[packet_count].data, 1, 6, stdin);
+        if(data_read < 6) break; // Incomplete header, stop reading
 
-        // Write the sorted packets to stdout
-        for (int i = 0; i < 5; ++i) {
-            int bytes_written = write(fileno(stdout), packets[i], packet_sizes[i]);
-            if (bytes_written != packet_sizes[i]) {
-                fprintf(stderr, "Data lost! %d bytes not written\n", packet_sizes[i] - bytes_written);
-            }
-            fflush(stdout);
-            free(packets[i]);
-        }
+        // Read sequence from header
+        packets[packet_count].sequence = get_bits(packets[packet_count].data, 14, 18);
+
+        // Read packet length
+        int data_length = get_bits(packets[packet_count].data, 16, 32);
+        
+        // Read the rest of packet
+        data_read += fread(packets[packet_count].data + 6, 1, data_length + 1, stdin);
+        if(data_read != data_length + 6 + 1) break; // Incomplete packet, stop reading
+
+        packets[packet_count].size = data_read;
+        packet_count++;
     }
+
+    // Sort packets
+    sort_packets(packets, packet_count);
+
+    // Write sorted packets back
+    for(int i = 0; i < packet_count; i++) {
+        fwrite(packets[i].data, 1, packets[i].size, stdout);
+    }
+
     return 0;
 }
