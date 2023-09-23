@@ -1,70 +1,82 @@
-#include "common.h"
+#include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <string.h>
 #include <unistd.h>
+#include "common.h"
 
-uint8_t *packets[5];
+uint8_t *packet_buffers[5];
 int packet_sizes[5];
-int set_packets = 0;
 
-void fix_packet(uint8_t *packet, int size, uint8_t *output) {
-    // Init all bytes to zero
-    memset(output, 0, size);
+int majority_vote(int bit_counts[]) {
+    return bit_counts[1] > bit_counts[0] ? 1 : 0;
+}
 
-    //Majority vote for each bit in packet
-    for (int i = 0; i < size * 8; ++i) {
-        int bit_count = 0;
-        for (int j = 0; j < 5; ++j) {
-            uint8_t bit = get_bits(packets[j], 1, i);
-            bit_count += bit;
-        }
+void fix_packet(int packet_size) {
+    uint8_t *fixed_packet = malloc(packet_size);
+    memset(fixed_packet, 0, packet_size);
 
-        // Set or clear bit in output based on vote
-        if (bit_count >= 3) {
-            // Majority had bit set
-            output[i / 8] |= (1 << (i % 8));
+    for (int byte_index = 0; byte_index < packet_size; ++byte_index) {
+        int bit_counts[2] = {0, 0};
+
+        for (int bit_index = 0; bit_index < 8; ++bit_index) {
+            for (int i = 0; i < 5; ++i) {
+                int bit = get_bits(packet_buffers[i] + byte_index, 1, bit_index);
+                bit_counts[bit]++;
+            }
+            int majority_bit = majority_vote(bit_counts);
+            fixed_packet[byte_index] |= (majority_bit << bit_index);
         }
     }
+
+    int bytes_written = write(fileno(stdout), fixed_packet, packet_size);
+    if (bytes_written < packet_size) {
+        fprintf(stderr, "Data lost! %d bytes not written\n", packet_size - bytes_written);
+    }
+    fflush(stdout);
+
+    free(fixed_packet);
 }
 
 int main() {
-    uint8_t *data = malloc(sizeof(uint8_t) * 100000);
-    for (int i = 0; i < 5; i++) {
-        packets[i] = NULL;
-    }
+    int set_packets = 0;
+    uint8_t header_buffer[6];
 
     while (!feof(stdin)) {
-        int data_read = fread(data, 1, 6, stdin);
-        int data_length = get_bits(data, 16, 32) + 1;
-        data_read += fread(data + 6, 1, data_length, stdin);
+        int header_read = fread(header_buffer, 1, 6, stdin);
+        if (header_read < 6) {
+            fprintf(stderr, "Incomplete header read\n");
+            continue;
+        }
+        
+        int data_length = get_bits(header_buffer, 16, 32) + 1;
+        int packet_size = 6 + data_length;
+        uint8_t *data_buffer = malloc(packet_size);
 
-        int rand = 0;
-        for (rand = random() % 5; packets[rand] != NULL; rand = random() % 5);
-        packets[rand] = malloc(data_read);
-        memcpy(packets[rand], data, data_read);
-        packet_sizes[rand] = data_read;
+        memcpy(data_buffer, header_buffer, 6);
 
-        set_packets += 1;
+        int data_read = fread(data_buffer + 6, 1, data_length, stdin);
+        if (data_read < data_length) {
+            fprintf(stderr, "Incomplete data read\n");
+            free(data_buffer);
+            continue;
+        }
+
+        packet_buffers[set_packets] = data_buffer;
+        packet_sizes[set_packets] = packet_size;
+
+        set_packets++;
         if (set_packets == 5) {
-            uint8_t *fixed_packet = malloc(packet_sizes[0]);
-            fix_packet(packets[0], packet_sizes[0], fixed_packet);
+            fix_packet(packet_size);
 
-            int bytes_written = write(fileno(stdout), fixed_packet, packet_sizes[0]);
-            if (bytes_written < packet_sizes[0]) {
-                fprintf(stderr, "Data lost! %d bytes not written\n", packet_sizes[0] - bytes_written);
+            for (int i = 0; i < 5; ++i) {
+                free(packet_buffers[i]);
+                packet_buffers[i] = NULL;
             }
-            fflush(stdout);
-
-            // Free allocated memory
-            for (int i = 0; i < 5; i++) {
-                free(packets[i]);
-                packets[i] = NULL;
-            }
-            free(fixed_packet);
 
             set_packets = 0;
         }
     }
-    free(data);
+
     return 0;
 }
