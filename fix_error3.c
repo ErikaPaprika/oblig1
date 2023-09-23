@@ -25,7 +25,7 @@ int main() {
         data_read += fread(data + 6, 1, data_length, stdin);
         set_packets += 1;
 
-        // Simulate error correction by flipping the same bits back
+        // eooorrorr corr backflip bit flip lel
         for (int i = 0; i < data_length; i++) {
             for (int bit_position = 0; bit_position < 8; bit_position++) {
                 if (random() % 2) { // Randomly decide whether to flip the bit
