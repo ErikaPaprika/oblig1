@@ -1,82 +1,55 @@
-#include <stdio.h>
+#include "common.h"
 #include <stdlib.h>
-#include <stdint.h>
 #include <string.h>
 #include <unistd.h>
-#include "common.h"
 
-uint8_t *packet_buffers[5];
+uint8_t *packets[5];
 int packet_sizes[5];
+int set_packets = 0;
 
-int majority_vote(int bit_counts[]) {
-    return bit_counts[1] > bit_counts[0] ? 1 : 0;
-}
-
-void fix_packet(int packet_size) {
-    uint8_t *fixed_packet = malloc(packet_size);
-    memset(fixed_packet, 0, packet_size);
-
-    for (int byte_index = 0; byte_index < packet_size; ++byte_index) {
-        int bit_counts[2] = {0, 0};
-
-        for (int bit_index = 0; bit_index < 8; ++bit_index) {
-            for (int i = 0; i < 5; ++i) {
-                int bit = get_bits(packet_buffers[i] + byte_index, 1, bit_index);
-                bit_counts[bit]++;
-            }
-            int majority_bit = majority_vote(bit_counts);
-            fixed_packet[byte_index] |= (majority_bit << bit_index);
-        }
-    }
-
-    int bytes_written = write(fileno(stdout), fixed_packet, packet_size);
-    if (bytes_written < packet_size) {
-        fprintf(stderr, "Data lost! %d bytes not written\n", packet_size - bytes_written);
-    }
-    fflush(stdout);
-
-    free(fixed_packet);
+int compare(const void *a, const void *b) {
+    uint8_t *packet_a = *(uint8_t **)a;
+    uint8_t *packet_b = *(uint8_t **)b;
+    int sequence_a = get_bits(packet_a, 14, 18);
+    int sequence_b = get_bits(packet_b, 14, 18);
+    return sequence_a - sequence_b;
 }
 
 int main() {
-    int set_packets = 0;
-    uint8_t header_buffer[6];
-
-    while (!feof(stdin)) {
-        int header_read = fread(header_buffer, 1, 6, stdin);
-        if (header_read < 6) {
-            fprintf(stderr, "Incomplete header read\n");
-            continue;
-        }
-        
-        int data_length = get_bits(header_buffer, 16, 32) + 1;
-        int packet_size = 6 + data_length;
-        uint8_t *data_buffer = malloc(packet_size);
-
-        memcpy(data_buffer, header_buffer, 6);
-
-        int data_read = fread(data_buffer + 6, 1, data_length, stdin);
-        if (data_read < data_length) {
-            fprintf(stderr, "Incomplete data read\n");
-            free(data_buffer);
-            continue;
-        }
-
-        packet_buffers[set_packets] = data_buffer;
-        packet_sizes[set_packets] = packet_size;
-
-        set_packets++;
-        if (set_packets == 5) {
-            fix_packet(packet_size);
-
-            for (int i = 0; i < 5; ++i) {
-                free(packet_buffers[i]);
-                packet_buffers[i] = NULL;
+    while(!feof(stdin)) {
+        for (set_packets = 0; set_packets < 5; ++set_packets) {
+            uint8_t header[6];
+            int header_read = fread(header, 1, 6, stdin);
+            if (header_read == 0) {
+                fprintf(stderr, "Incomplete header read.\n");
+                return 1;
             }
+            
+            int data_length = get_bits(header, 16, 32) + 1;
+            packets[set_packets] = malloc(6 + data_length);
+            memcpy(packets[set_packets], header, 6);
+            
+            int data_read = fread(packets[set_packets] + 6, 1, data_length, stdin);
+            if(data_read != data_length) {
+                fprintf(stderr, "Incomplete data read.\n");
+                return 1;
+            }
+            
+            packet_sizes[set_packets] = 6 + data_length;
+        }
 
-            set_packets = 0;
+        // Sort the packets based on their sequence number
+        qsort(packets, 5, sizeof(uint8_t *), compare);
+
+        // Write the sorted packets to stdout
+        for (int i = 0; i < 5; ++i) {
+            int bytes_written = write(fileno(stdout), packets[i], packet_sizes[i]);
+            if (bytes_written != packet_sizes[i]) {
+                fprintf(stderr, "Data lost! %d bytes not written\n", packet_sizes[i] - bytes_written);
+            }
+            fflush(stdout);
+            free(packets[i]);
         }
     }
-
     return 0;
 }
