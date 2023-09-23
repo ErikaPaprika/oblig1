@@ -7,7 +7,7 @@ uint8_t *packets[5];
 int packet_sizes[5];
 int set_packets = 0;
 
-// Function to flip a bit in a byte
+// Function do a bit flip wosah awsome 
 void flip_bit(uint8_t *byte, int bit_position) {
     *byte ^= (1 << bit_position);
 }
