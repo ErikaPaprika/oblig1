@@ -45,3 +45,22 @@ int main() {
         if(set_packets == 5) {
             fix_error(packets, set_packets);
 
+            for(int i = 0; i < set_packets; i++) {
+                int bytes_written = write(fileno(stdout), packets[i], packet_sizes[i]);
+                if(bytes_written < packet_sizes[i]) {
+                    fprintf(stderr, "Data lost! %d bytes not written\n", packet_sizes[i] - bytes_written);
+                }
+
+                free(packets[i]);
+                packets[i] = NULL;
+            }
+
+            set_packets = 0;
+        }
+    }
+
+    free(data);
+
+    return 0;
+}
+
