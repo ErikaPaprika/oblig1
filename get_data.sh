@@ -1,0 +1,2 @@
+wget https://is.sci.gsfc.nasa.gov/testdata/jpss1/JPSS-1_2014_CADU_Files/CADU_files/npp_ops_cadu_20140618_175920_000000_c169_x001.nppsmdcadu
+mv npp_ops_cadu_20140618_175920_000000_c169_x001.nppsmdcadu cadu_1
